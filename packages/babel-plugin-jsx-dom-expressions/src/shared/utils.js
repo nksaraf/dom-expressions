@@ -27,29 +27,15 @@ export function registerImportMethod(path, name, moduleName) {
   const imports =
     path.scope.getProgramParent().data.imports ||
     (path.scope.getProgramParent().data.imports = new Map());
-  const vars =
-    path.scope.getProgramParent().data.vars ||
-    (path.scope.getProgramParent().data.vars = new Set());
   moduleName = moduleName || getConfig(path).moduleName;
   if (!imports.has(`${moduleName}:${name}`)) {
-    let hint = `_$${name}`;
-    while (vars.has(hint)) {
-      hint = hint.charAt(hint.length - 1).match(/[0-9]/) ? (`_$${name}` + (Number(hint.substring(`_$${name}`.length)) + 1)) : (`_$${name}2`);
-    }
     let id = addNamed(path, name, moduleName, {
-      nameHint: hint
+      nameHint: `_$${name}`
     });
-    vars.add(hint)
-    imports.set(`${moduleName}:${name}`, t.identifier(hint));
-    return t.identifier(hint);
+    imports.set(`${moduleName}:${name}`, id);
+    return t.identifier(id.name);
   } else {
     let iden = imports.get(`${moduleName}:${name}`);
-    // console.log(path.scope);
-    // if (path.scope.hasBinding(iden.name)) {
-    //   // console.log(iden);
-    // } else {
-    //   console.log(iden);
-    // }
     return t.identifier(iden.name);
   }
 }

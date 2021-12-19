@@ -22,11 +22,4 @@ export default path => {
     domTemplates.length > 0 && appendTemplatesDOM(path, domTemplates);
     ssrTemplates.length > 0 && appendTemplatesSSR(path, ssrTemplates);
   }
-
-  let imports = path.scope.data.imports;
-  for (var [key, val] of imports.entries()) {
-    // addNamed(path, key.split(':')[1], key.split(':')[0], {
-    //   nameHint: val.name
-    // })
-  }
 };
