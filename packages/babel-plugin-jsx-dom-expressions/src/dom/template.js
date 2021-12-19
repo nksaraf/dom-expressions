@@ -1,5 +1,5 @@
 import * as t from "@babel/types";
-import { getConfig, registerImportMethod } from "../shared/utils";
+import { getConfig, getRendererConfig, registerImportMethod } from "../shared/utils";
 import { setAttr } from "./element";
 
 export function createTemplate(path, result, wrap) {
@@ -29,8 +29,8 @@ export function createTemplate(path, result, wrap) {
     }
   }
   if (wrap && result.dynamic && config.memoWrapper) {
-    registerImportMethod(path, config.memoWrapper);
-    return t.callExpression(t.identifier(`_$${config.memoWrapper}`), [result.exprs[0]]);
+    let memoWrapper = registerImportMethod(path, config.memoWrapper);
+    return t.callExpression(memoWrapper, [result.exprs[0]]);
   }
   return result.exprs[0];
 }
@@ -41,11 +41,11 @@ export function appendTemplates(path, templates) {
       cooked: template.template,
       raw: template.template
     };
-    registerImportMethod(path, "template");
+    let templateImport = registerImportMethod(path, "template", getRendererConfig(path, "dom").moduleName);
     return t.variableDeclarator(
       template.id,
       t.callExpression(
-        t.identifier("_$template"),
+        templateImport,
         [
           t.templateLiteral([t.templateElement(tmpl, true)], []),
           t.numericLiteral(template.elementCount)
@@ -73,15 +73,18 @@ function registerTemplate(path, results) {
           id: templateId,
           template: results.template,
           elementCount: results.template.split("<").length - 1,
-          isSVG: results.isSVG
+          isSVG: results.isSVG,
+          renderer: "dom"
         });
       }
     }
-    hydratable && registerImportMethod(path, "getNextElement");
+    let getNextElement;
+    hydratable &&
+      (getNextElement = registerImportMethod(path, "getNextElement", getRendererConfig(path, "dom").moduleName));
     decl = t.variableDeclarator(
       results.id,
       hydratable
-        ? t.callExpression(t.identifier("_$getNextElement"), templateId ? [templateId] : [])
+        ? t.callExpression(getNextElement, templateId ? [templateId] : [])
         : t.callExpression(t.memberExpression(templateId, t.identifier("cloneNode")), [
             t.booleanLiteral(true)
           ])
@@ -94,9 +97,7 @@ function registerTemplate(path, results) {
 function wrapDynamics(path, dynamics) {
   if (!dynamics.length) return;
   const config = getConfig(path);
-  registerImportMethod(path, config.effectWrapper);
-
-  const effectWrapperId = `_$${config.effectWrapper}`;
+  let effectWrapper = registerImportMethod(path, config.effectWrapper);
 
   if (dynamics.length === 1) {
     const prevValue =
@@ -105,7 +106,7 @@ function wrapDynamics(path, dynamics) {
         : undefined;
 
     return t.expressionStatement(
-      t.callExpression(t.identifier(effectWrapperId), [
+      t.callExpression(effectWrapper, [
         t.arrowFunctionExpression(
           prevValue ? [prevValue] : [],
           setAttr(path, dynamics[0].elem, dynamics[0].key, dynamics[0].value, {
@@ -157,7 +158,7 @@ function wrapDynamics(path, dynamics) {
   });
 
   return t.expressionStatement(
-    t.callExpression(t.identifier(effectWrapperId), [
+    t.callExpression(effectWrapper, [
       t.arrowFunctionExpression(
         [prevId],
         t.blockStatement([

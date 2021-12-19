@@ -12,18 +12,45 @@ export const reservedNameSpaces = new Set([
 ]);
 
 export function getConfig(path) {
-  return path.hub.file.metadata.config;
+  return {
+    // ...defaultConfig,
+    ...path.hub.file.metadata.config
+  };
 }
 
-export function registerImportMethod(path, name) {
+export const getRendererConfig = (path, renderer) => {
+  const config = getConfig(path);
+  return config?.renderers?.find(r => r.name === renderer) ?? config;
+};
+
+export function registerImportMethod(path, name, moduleName) {
   const imports =
     path.scope.getProgramParent().data.imports ||
-    (path.scope.getProgramParent().data.imports = new Set());
-  if (!imports.has(name)) {
-    addNamed(path, name, getConfig(path).moduleName, {
-      nameHint: `_$${name}`
+    (path.scope.getProgramParent().data.imports = new Map());
+  const vars =
+    path.scope.getProgramParent().data.vars ||
+    (path.scope.getProgramParent().data.vars = new Set());
+  moduleName = moduleName || getConfig(path).moduleName;
+  if (!imports.has(`${moduleName}:${name}`)) {
+    let hint = `_$${name}`;
+    while (vars.has(hint)) {
+      hint = hint.charAt(hint.length - 1).match(/[0-9]/) ? (`_$${name}` + (Number(hint.substring(`_$${name}`.length)) + 1)) : (`_$${name}2`);
+    }
+    let id = addNamed(path, name, moduleName, {
+      nameHint: hint
     });
-    imports.add(name);
+    vars.add(hint)
+    imports.set(`${moduleName}:${name}`, t.identifier(hint));
+    return t.identifier(hint);
+  } else {
+    let iden = imports.get(`${moduleName}:${name}`);
+    // console.log(path.scope);
+    // if (path.scope.hasBinding(iden.name)) {
+    //   // console.log(iden);
+    // } else {
+    //   console.log(iden);
+    // }
+    return t.identifier(iden.name);
   }
 }
 
@@ -191,7 +218,7 @@ export function wrappedByText(list, startIndex) {
 export function transformCondition(path, inline, deep) {
   const config = getConfig(path);
   const expr = path.node;
-  registerImportMethod(path, config.memoWrapper);
+  let memoWrapper = registerImportMethod(path, config.memoWrapper);
   let dTest, cond, id;
   if (
     t.isConditionalExpression(expr) &&
@@ -206,7 +233,7 @@ export function transformCondition(path, inline, deep) {
       if (!t.isBinaryExpression(cond))
         cond = t.unaryExpression("!", t.unaryExpression("!", cond, true), true);
       id = inline
-        ? t.callExpression(t.identifier(`_$${config.memoWrapper}`), [
+        ? t.callExpression(memoWrapper, [
             t.arrowFunctionExpression([], cond),
             t.booleanLiteral(true)
           ])

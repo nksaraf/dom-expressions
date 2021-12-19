@@ -10,10 +10,7 @@ import {
   trimWhitespace,
   transformCondition
 } from "./utils";
-import { transformNode } from "./transform";
-import { createTemplate as createTemplateDOM } from "../dom/template";
-import { createTemplate as createTemplateSSR } from "../ssr/template";
-import { createTemplate as createTemplateUniversal } from "../universal/template";
+import { transformNode, getCreateTemplate } from "./transform";
 
 export default function transformComponent(path) {
   let exprs = [],
@@ -25,8 +22,8 @@ export default function transformComponent(path) {
     hasChildren = path.node.children.length > 0;
 
   if (config.builtIns.indexOf(tagName) > -1 && !path.scope.hasBinding(tagName)) {
-    registerImportMethod(path, tagName);
-    tagName = `_$${tagName}`;
+    let tagIden = registerImportMethod(path, tagName);
+    tagName = tagIden.name;
   }
 
   path
@@ -170,12 +167,13 @@ export default function transformComponent(path) {
   if (runningObject.length || !props.length) props.push(t.objectExpression(runningObject));
 
   if (props.length > 1 || dynamicSpread) {
-    registerImportMethod(path, "mergeProps");
-    props = [t.callExpression(t.identifier("_$mergeProps"), props)];
+    let mergeProps = registerImportMethod(path, "mergeProps")
+    props = [t.callExpression(mergeProps, props)];
   }
-  registerImportMethod(path, "createComponent");
+  
+  let createComponent = registerImportMethod(path, "createComponent");
   const componentArgs = [tagNameToIdentifier(tagName), props[0]];
-  exprs.push(t.callExpression(t.identifier("_$createComponent"), componentArgs));
+  exprs.push(t.callExpression(createComponent, componentArgs));
 
   // handle hoisting conditionals
   if (exprs.length > 1) {
@@ -191,13 +189,7 @@ export default function transformComponent(path) {
 }
 
 function transformComponentChildren(children, config) {
-  const createTemplate =
-      config.generate === "universal"
-        ? createTemplateUniversal
-        : config.generate === "ssr"
-        ? createTemplateSSR
-        : createTemplateDOM,
-    filteredChildren = filterChildren(children);
+  const filteredChildren = filterChildren(children);
   if (!filteredChildren.length) return;
   let dynamic = false;
 
@@ -211,7 +203,7 @@ function transformComponentChildren(children, config) {
         componentChild: true
       });
       dynamic = dynamic || child.dynamic;
-      memo.push(createTemplate(path, child, filteredChildren.length > 1));
+      memo.push(getCreateTemplate(config, path, child)(path, child, filteredChildren.length > 1));
     }
     return memo;
   }, []);

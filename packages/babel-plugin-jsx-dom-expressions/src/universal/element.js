@@ -6,7 +6,8 @@ import {
   registerImportMethod,
   filterChildren,
   checkLength,
-  getConfig
+  getConfig,
+  getRendererConfig
 } from "../shared/utils";
 import { transformNode } from "../shared/transform";
 
@@ -18,14 +19,15 @@ export function transformElement(path, info) {
       exprs: [],
       dynamics: [],
       postExprs: [],
-      tagName
+      tagName,
+      renderer: "universal"
     };
 
-  registerImportMethod(path, "createElement");
+  let createElement = registerImportMethod(path, "createElement", getRendererConfig(path, "universal").moduleName);
   results.decl.push(
     t.variableDeclarator(
       results.id,
-      t.callExpression(t.identifier("_$createElement"), [t.stringLiteral(tagName)])
+      t.callExpression(createElement, [t.stringLiteral(tagName)])
     )
   );
 
@@ -38,7 +40,6 @@ export function transformElement(path, info) {
 function transformAttributes(path, results) {
   let children;
   const elem = results.id,
-    spread = t.identifier("_$spread"),
     hasChildren = path.node.children.length > 0,
     config = getConfig(path);
 
@@ -48,7 +49,7 @@ function transformAttributes(path, results) {
     .forEach(attribute => {
       const node = attribute.node;
       if (t.isJSXSpreadAttribute(node)) {
-        registerImportMethod(attribute, "spread");
+        let spread = registerImportMethod(attribute, "spread", getRendererConfig(path, "universal").moduleName);
         results.exprs.push(
           t.expressionStatement(
             t.callExpression(spread, [
@@ -167,10 +168,10 @@ function transformAttributes(path, results) {
 }
 
 export function setAttr(path, elem, name, value, { prevId } = {}) {
-  registerImportMethod(path, "setProp");
+  let setProp = registerImportMethod(path, "setProp", getRendererConfig(path, "universal").moduleName);
   if (!value) value = t.booleanLiteral(true);
   return t.callExpression(
-    t.identifier("_$setProp"),
+    setProp,
     prevId ? [elem, t.stringLiteral(name), value, prevId] : [elem, t.stringLiteral(name), value]
   );
 }
@@ -190,37 +191,41 @@ function transformChildren(path, results) {
   const appends = [];
   childNodes.forEach((child, index) => {
     if (!child) return;
+    if (child.tagName && child.renderer !== "universal") {
+      throw new Error(`<${child.tagName}> is not supported in <${getTagName(path.node)}>.
+        Wrap the usage with a component that would render this element, eg. Canvas`);
+    }
     if (child.id) {
-      registerImportMethod(path, "insertNode");
+      let insertNode = registerImportMethod(path, "insertNode", getRendererConfig(path, "universal").moduleName);
       let insert = child.id;
       if (child.text) {
-        registerImportMethod(path, "createTextNode");
+        let createTextNode = registerImportMethod(path, "createTextNode", getRendererConfig(path, "universal").moduleName);
         if (multi) {
           results.decl.push(
             t.variableDeclarator(
               child.id,
-              t.callExpression(t.identifier("_$createTextNode"), [
+              t.callExpression(createTextNode, [
                 t.stringLiteral(decode(child.template))
               ])
             )
           );
         } else
-          insert = t.callExpression(t.identifier("_$createTextNode"), [
+          insert = t.callExpression(createTextNode, [
             t.stringLiteral(decode(child.template))
           ]);
       }
       appends.push(
-        t.expressionStatement(t.callExpression(t.identifier("_$insertNode"), [results.id, insert]))
+        t.expressionStatement(t.callExpression(insertNode, [results.id, insert]))
       );
       results.decl.push(...child.decl);
       results.exprs.push(...child.exprs);
       results.dynamics.push(...child.dynamics);
     } else if (child.exprs.length) {
-      registerImportMethod(path, "insert");
+      let insert = registerImportMethod(path, "insert", getRendererConfig(path, "universal").moduleName);
       if (multi) {
         results.exprs.push(
           t.expressionStatement(
-            t.callExpression(t.identifier("_$insert"), [
+            t.callExpression(insert, [
               results.id,
               child.exprs[0],
               nextChild(childNodes, index) || t.nullLiteral()
@@ -230,7 +235,7 @@ function transformChildren(path, results) {
       } else {
         results.exprs.push(
           t.expressionStatement(
-            t.callExpression(t.identifier("_$insert"), [results.id, child.exprs[0]])
+            t.callExpression(insert, [results.id, child.exprs[0]])
           )
         );
       }
