@@ -12,10 +12,7 @@ export const reservedNameSpaces = new Set([
 ]);
 
 export function getConfig(path) {
-  return {
-    // ...defaultConfig,
-    ...path.hub.file.metadata.config
-  };
+  return path.hub.file.metadata.config;
 }
 
 export const getRendererConfig = (path, renderer) => {
