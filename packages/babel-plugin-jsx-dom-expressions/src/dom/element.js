@@ -21,6 +21,7 @@ import {
   getStaticExpression,
   reservedNameSpaces,
   wrappedByText,
+  getRendererConfig,
   getConfig
 } from "../shared/utils";
 import { transformNode } from "../shared/transform";
@@ -37,7 +38,8 @@ export function transformElement(path, info) {
       dynamics: [],
       postExprs: [],
       isSVG: wrapSVG,
-      tagName
+      tagName,
+      renderer: "dom"
     };
   if (tagName === "html" && config.hydratable) results.skipTemplate = true;
   if (wrapSVG) results.template = "<svg>" + results.template;
@@ -52,8 +54,9 @@ export function transformElement(path, info) {
     results.template += `</${tagName}>`;
   }
   if (info.topLevel && config.hydratable && results.hasHydratableEvent) {
+    let runHydrationEvents = registerImportMethod(path, "runHydrationEvents", getRendererConfig(path, "dom").moduleName);
     results.postExprs.push(
-      t.expressionStatement(t.callExpression(registerImportMethod(path, "runHydrationEvents"), []))
+      t.expressionStatement(t.callExpression(runHydrationEvents, []))
     );
   }
   if (wrapSVG) results.template += "</svg>";
@@ -89,8 +92,9 @@ export function setAttr(path, elem, name, value, { isSVG, dynamic, prevId, isCE 
   }
 
   if (name === "style") {
+    let style = registerImportMethod(path, "style", getRendererConfig(path, "dom").moduleName);
     return t.callExpression(
-      registerImportMethod(path, "style"),
+      style,
       prevId ? [elem, value, prevId] : [elem, value]
     );
   }
@@ -100,8 +104,9 @@ export function setAttr(path, elem, name, value, { isSVG, dynamic, prevId, isCE 
   }
 
   if (name === "classList") {
+    let classList = registerImportMethod(path, "classList", getRendererConfig(path, "dom").moduleName);
     return t.callExpression(
-      registerImportMethod(path, "classList"),
+      classList,
       prevId ? [elem, value, prevId] : [elem, value]
     );
   }
@@ -127,14 +132,16 @@ export function setAttr(path, elem, name, value, { isSVG, dynamic, prevId, isCE 
   !isSVG && (name = name.toLowerCase());
   const ns = isNameSpaced && SVGNamespace[name.split(":")[0]];
   if (ns) {
-    return t.callExpression(registerImportMethod(path, "setAttributeNS"), [
+    let setAttributeNS = registerImportMethod(path, "setAttributeNS", getRendererConfig(path, "dom").moduleName)
+    return t.callExpression(setAttributeNS, [
       elem,
       t.stringLiteral(ns),
       t.stringLiteral(name),
       value
     ]);
   } else {
-    return t.callExpression(registerImportMethod(path, "setAttribute"), [elem, t.stringLiteral(name), value]);
+    let setAttribute = registerImportMethod(path, "setAttribute", getRendererConfig(path, "dom").moduleName);
+    return t.callExpression(setAttribute, [elem, t.stringLiteral(name), value]);
   }
 }
 
@@ -292,9 +299,14 @@ function transformAttributes(path, results) {
     .forEach(attribute => {
       const node = attribute.node;
       if (t.isJSXSpreadAttribute(node)) {
+        let spread = registerImportMethod(
+          attribute,
+          "spread",
+          getRendererConfig(path, "dom").moduleName
+        );
         results.exprs.push(
           t.expressionStatement(
-            t.callExpression(registerImportMethod(attribute, "spread"), [
+            t.callExpression(spread, [
               elem,
               isDynamic(attribute.get("argument"), {
                 checkMember: true
@@ -396,11 +408,9 @@ function transformAttributes(path, results) {
             );
           }
         } else if (key.startsWith("use:")) {
-          // Some trick to treat JSXIdentifier as Identifier
-          node.name.name.type = 'Identifier';
           results.exprs.unshift(
             t.expressionStatement(
-              t.callExpression(node.name.name, [
+              t.callExpression(t.identifier(node.name.name.name), [
                 elem,
                 t.arrowFunctionExpression(
                   [],
@@ -472,9 +482,14 @@ function transformAttributes(path, results) {
                 )
               );
             } else {
+              let addEventListener = registerImportMethod(
+                path,
+                "addEventListener",
+                getRendererConfig(path, "dom").moduleName
+              );
               results.exprs.unshift(
                 t.expressionStatement(
-                  t.callExpression(registerImportMethod(path, "addEventListener"), [
+                  t.callExpression(addEventListener, [
                     elem,
                     t.stringLiteral(ev),
                     handler,
@@ -511,9 +526,14 @@ function transformAttributes(path, results) {
                 )
               );
             } else {
+              let addEventListener = registerImportMethod(
+                path,
+                "addEventListener",
+                getRendererConfig(path, "dom").moduleName
+              );
               results.exprs.unshift(
                 t.expressionStatement(
-                  t.callExpression(registerImportMethod(path, "addEventListener"), [
+                  t.callExpression(addEventListener, [
                     elem,
                     t.stringLiteral(ev),
                     handler
@@ -593,11 +613,18 @@ function transformChildren(path, results, config) {
 
   childNodes.forEach((child, index) => {
     if (!child) return;
+    if (child.tagName && child.renderer !== "dom") {
+      throw new Error(`<${child.tagName}> is not supported in <${tagName}>.
+      Wrap the usage with a component that would render this element, eg. Canvas`);
+    }
+
     results.template += child.template;
     if (child.id) {
-      if (child.tagName === "head") return;
+    if (child.tagName === "head") return;
+    
+    let getNextMatch;
       if (config.hydratable && tagName === "html") {
-        registerImportMethod(path, "getNextMatch");
+        getNextMatch = registerImportMethod(path, "getNextMatch", getRendererConfig(path, "dom").moduleName);
       }
       const walk = t.memberExpression(
         t.identifier(tempPath),
@@ -607,7 +634,7 @@ function transformChildren(path, results, config) {
         t.variableDeclarator(
           child.id,
           config.hydratable && tagName === "html"
-            ? t.callExpression(registerImportMethod(path, "getNextMatch"), [
+            ? t.callExpression(getNextMatch, [
                 walk,
                 t.stringLiteral(child.tagName)
               ])
@@ -622,7 +649,7 @@ function transformChildren(path, results, config) {
       nextPlaceholder = null;
       i++;
     } else if (child.exprs.length) {
-      const insert = registerImportMethod(path, "insert");
+      let insert = registerImportMethod(path, "insert", getRendererConfig(path, "dom").moduleName);
       const multi = checkLength(filteredChildren),
         markers = config.hydratable && multi;
       // boxed by textNodes
@@ -695,11 +722,16 @@ function createPlaceholder(path, results, tempPath, i, char) {
   let contentId;
   results.template += `<!${char}>`;
   if (config.hydratable && char === "/") {
+    let getNextMarker = registerImportMethod(
+      path,
+      "getNextMarker",
+      getRendererConfig(path, "dom").moduleName
+    );
     contentId = path.scope.generateUidIdentifier("co$");
     results.decl.push(
       t.variableDeclarator(
         t.arrayPattern([exprId, contentId]),
-        t.callExpression(registerImportMethod(path, "getNextMarker"), [
+        t.callExpression(getNextMarker, [
           t.memberExpression(t.identifier(tempPath), t.identifier("nextSibling"))
         ])
       )
@@ -765,12 +797,13 @@ function detectExpressions(children, index, config) {
 }
 
 function contextToCustomElement(path, results) {
+  let getOwner = registerImportMethod(path, "getOwner", getRendererConfig(path, "dom").moduleName);
   results.exprs.push(
     t.expressionStatement(
       t.assignmentExpression(
         "=",
         t.memberExpression(results.id, t.identifier("_$owner")),
-        t.callExpression(registerImportMethod(path, "getOwner"), [])
+        t.callExpression(getOwner, [])
       )
     )
   );

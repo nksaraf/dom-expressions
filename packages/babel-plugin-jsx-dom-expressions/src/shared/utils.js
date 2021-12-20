@@ -15,18 +15,29 @@ export function getConfig(path) {
   return path.hub.file.metadata.config;
 }
 
-export function registerImportMethod(path, name) {
+export const getRendererConfig = (path, renderer) => {
+  const config = getConfig(path);
+  return config?.renderers?.find(r => r.name === renderer) ?? config;
+};
+
+export function registerImportMethod(path, name, moduleName) {
   const imports =
     path.scope.getProgramParent().data.imports ||
     (path.scope.getProgramParent().data.imports = new Map());
-  if (!imports.has(name)) {
-    const identifier = addNamed(path, name, getConfig(path).moduleName, {
+  moduleName = moduleName || getConfig(path).moduleName;
+  if (!imports.has(`${moduleName}:${name}`)) {
+    let id = addNamed(path, name, moduleName, {
       nameHint: `_$${name}`
     });
-    imports.set(name, identifier);
-    return identifier;
+    imports.set(`${moduleName}:${name}`, id);
+    return id;
+  } else {
+    let iden = imports.get(`${moduleName}:${name}`);
+    // the cloning is required to play well with babel-preset-env which is
+    // transpiling import as we add them and using the same identifier causes
+    // problems with the multiple identifiers of the same thing
+    return t.cloneDeep(iden);
   }
-  return imports.get(name);
 }
 
 function jsxElementNameToString(node) {
@@ -208,10 +219,7 @@ export function transformCondition(path, inline, deep) {
       if (!t.isBinaryExpression(cond))
         cond = t.unaryExpression("!", t.unaryExpression("!", cond, true), true);
       id = inline
-        ? t.callExpression(memo, [
-            t.arrowFunctionExpression([], cond),
-            t.booleanLiteral(true)
-          ])
+        ? t.callExpression(memo, [t.arrowFunctionExpression([], cond), t.booleanLiteral(true)])
         : path.scope.generateUidIdentifier("_c$");
       expr.test = t.callExpression(id, []);
       if (t.isConditionalExpression(expr.consequent) || t.isLogicalExpression(expr.consequent)) {
@@ -237,10 +245,7 @@ export function transformCondition(path, inline, deep) {
       if (!t.isBinaryExpression(cond))
         cond = t.unaryExpression("!", t.unaryExpression("!", cond, true), true);
       id = inline
-        ? t.callExpression(memo, [
-            t.arrowFunctionExpression([], cond),
-            t.booleanLiteral(true)
-          ])
+        ? t.callExpression(memo, [t.arrowFunctionExpression([], cond), t.booleanLiteral(true)])
         : path.scope.generateUidIdentifier("_c$");
       nextPath.node.left = t.callExpression(id, []);
     }
@@ -251,10 +256,7 @@ export function transformCondition(path, inline, deep) {
         t.variableDeclarator(
           id,
           config.memoWrapper
-            ? t.callExpression(memo, [
-                t.arrowFunctionExpression([], cond),
-                t.booleanLiteral(true)
-              ])
+            ? t.callExpression(memo, [t.arrowFunctionExpression([], cond), t.booleanLiteral(true)])
             : t.arrowFunctionExpression([], cond)
         )
       ]),
